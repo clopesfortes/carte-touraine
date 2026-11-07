@@ -99,7 +99,32 @@ function render() {
   document.getElementById("count").textContent = n === 0 ? "Aucun événement pour ces critères." : `${n} événement${n > 1 ? "s" : ""} affiché${n > 1 ? "s" : ""}`;
 }
 
-fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(data => {
+const SB_URL = "https://tvuxgyweuecdkbhfdduq.supabase.co";
+const SB_KEY = "sb_publishable_PNxoKVYUvO7TiDY4EyB_8A_OFgztynM";
+
+async function fromSupabase() {
+  const today = iso(new Date());
+  const seen = encodeURIComponent(new Date(Date.now() - 3 * 864e5).toISOString());
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,last_seen` +
+      `&last_end=gte.${today}&last_seen=gte.${seen}&order=first_start.asc&limit=1000&offset=${offset}`;
+    const r = await fetch(url, {headers: {apikey: SB_KEY}});
+    if (!r.ok) throw new Error(r.status);
+    const page = await r.json();
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  if (!rows.length) throw new Error("vide");
+  return {
+    generated_at: rows.map(x => x.last_seen).sort().pop(),
+    features: rows.map(({lat, lon, last_seen, ...p}) => ({type: "Feature", geometry: {coordinates: [lon, lat]}, properties: p}))
+  };
+}
+
+const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+fromSupabase().catch(fromFile).then(data => {
   features = data.features || [];
   if (data.generated_at) document.getElementById("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
   render();

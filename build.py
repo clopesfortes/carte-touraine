@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import config
 from datatourisme import DatatourismeError, fetch_events
 from normalize import normalize
+from supabase_client import SupabaseError, upsert_events
 
 OUTPUT = config.ROOT / "site" / "events.geojson"
 
@@ -48,8 +49,36 @@ def main():
         "features": features,
     }, ensure_ascii=False), encoding="utf-8")
 
-    print(f"{len(raw_events)} reçus, {len(features)} publiés sur la carte.")
+    print(f"{len(raw_events)} reçus, {len(features)} publiables.")
     print(f"Écartés : {dict(rejected) or 'aucun'}")
+
+    try:
+        supabase = config.load_supabase()
+    except config.ConfigError as error:
+        sys.exit(f"ERREUR : {error}")
+
+    if supabase is None:
+        print("ATTENTION : Supabase non configuré, envoi ignoré (la carte utilise events.geojson).")
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    rows = {}
+    for f in features:
+        p = f["properties"]
+        lon, lat = f["geometry"]["coordinates"]
+        rows[p["id"]] = {
+            "id": p["id"], "source": "DATAtourisme", "title": p["title"],
+            "locality": p["locality"], "lat": lat, "lon": lon, "dates": p["dates"],
+            "first_start": min(d["start"] for d in p["dates"]),
+            "last_end": max(d["end"] for d in p["dates"]),
+            "description": p["description"], "image": p["image"], "url": p["url"],
+            "last_seen": now,
+        }
+    try:
+        upsert_events(*supabase, list(rows.values()))
+    except SupabaseError as error:
+        sys.exit(f"ERREUR : {error}")
+    print(f"{len(rows)} événements enregistrés dans Supabase.")
 
 
 if __name__ == "__main__":

@@ -40,3 +40,16 @@ def load():
         "department": get("department", "37"),
         "page_size": page_size,
     }
+
+
+def load_supabase():
+    """Retourne (url, clé secrète) ou None si Supabase n'est pas configuré."""
+    parser = configparser.ConfigParser()
+    parser.read(ROOT / "config.ini", encoding="utf-8")
+    url = os.environ.get("SUPABASE_URL", "").strip() or parser.get("SUPABASE", "url", fallback="").strip()
+    key = os.environ.get("SUPABASE_SECRET_KEY", "").strip() or parser.get("SUPABASE", "secret_key", fallback="").strip()
+    if not url or not key:
+        return None
+    if not key.startswith("sb_secret_"):
+        raise ConfigError("La clé Supabase doit commencer par sb_secret_ (clé secrète, pas publique).")
+    return url, key
