@@ -27,6 +27,8 @@ jobs:
       - name: Collecter les événements
         env:
           DATATOURISME_API_KEY: ${{ secrets.DATATOURISME_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python build.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
