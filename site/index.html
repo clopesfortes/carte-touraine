@@ -29,6 +29,17 @@ main{flex:1;min-height:0;display:flex}
 #map{flex:1;min-height:0}
 .pop h2{margin:0 0 .2rem;font:700 1rem Georgia,serif}
 .pop p{margin:.25rem 0}.pop img{max-width:100%;max-height:120px;border-radius:3px}
+.note{font-size:.8rem;color:#6a4b00}
+.rep{font:inherit;font-size:.8rem;padding:.1rem .5rem;border:1px solid #8a9a9a;border-radius:4px;background:#fff;cursor:pointer}
+dialog{width:min(520px,94vw);border:1px solid var(--line);border-radius:8px;padding:1rem 1.2rem}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{margin:0 0 .5rem;font:700 1.15rem Georgia,serif}
+dialog label{display:block;margin:.5rem 0 .1rem;font-size:.9rem}
+dialog input,dialog select,dialog textarea{width:100%;font:inherit;padding:.4rem .6rem;border:1px solid #8a9a9a;border-radius:4px}
+.row{display:flex;gap:.6rem}.row>div{flex:1}
+.hp{position:absolute;left:-9999px}
+#fmsg{min-height:1.4rem;margin:.5rem 0;font-size:.9rem}
+.small{font-size:.8rem;color:#4b5b5a}
 footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
 @media (max-width:800px){
   html,body{height:auto}
@@ -53,6 +64,7 @@ footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
     </select>
     <select id="cat" aria-label="Catégorie"><option value="">Toutes catégories</option></select>
     <button class="near" id="near" type="button">Autour de moi</button>
+    <button class="near" id="add" type="button">Proposer un événement</button>
     <select id="radius" aria-label="Distance" hidden>
       <option value="0">Toute distance</option><option value="5">5 km</option><option value="10" selected>10 km</option><option value="25">25 km</option>
     </select>
@@ -66,7 +78,27 @@ footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
   Données : DATAtourisme, <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/">Licence Ouverte 2.0</a>.
   Fond de carte © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>. <span id="updated"></span>
 </footer>
+<dialog id="dlg">
+  <form id="form">
+    <h2>Proposer un événement</h2>
+    <p class="small">Votre proposition est contrôlée automatiquement, puis publiée avec la mention « proposé par un visiteur, non vérifié ». Elle peut être masquée si elle est signalée. N’indiquez aucune donnée personnelle.</p>
+    <label for="f-title">Titre *</label><input id="f-title" name="title" required minlength="5" maxlength="100">
+    <div class="row"><div><label for="f-loc">Commune *</label><input id="f-loc" name="locality" required maxlength="60"></div>
+    <div><label for="f-cat">Catégorie</label><select id="f-cat" name="category"><option>Fête et animation</option><option>Marché et foire</option><option>Concert et musique</option><option>Spectacle</option><option>Exposition et culture</option><option>Sport et nature</option><option>Gastronomie</option><option>Festival</option><option>Autre</option></select></div></div>
+    <label for="f-addr">Adresse ou lieu (facultatif)</label><input id="f-addr" name="address" maxlength="120" placeholder="ex. Salle des fêtes, rue de la Mairie">
+    <div class="row"><div><label for="f-ds">Date *</label><input id="f-ds" name="date_start" type="date" required></div>
+    <div><label for="f-de">Fin (facultatif)</label><input id="f-de" name="date_end" type="date"></div>
+    <div><label for="f-t">Heure</label><input id="f-t" name="time" type="time"></div></div>
+    <label for="f-desc">Description (facultatif)</label><textarea id="f-desc" name="description" rows="3" maxlength="500"></textarea>
+    <label for="f-url">Lien d’information (facultatif)</label><input id="f-url" name="url" type="url" maxlength="200" placeholder="https://…">
+    <div class="hp" aria-hidden="true"><label>Site web<input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <div id="ts" style="margin-top:.6rem"></div>
+    <div id="fmsg" role="status"></div>
+    <div class="row"><button class="near" id="send" type="submit">Envoyer</button><button class="rep" id="cancel" type="button">Annuler</button></div>
+  </form>
+</dialog>
 <noscript>Cette carte nécessite JavaScript.</noscript>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
 <script>
@@ -102,7 +134,8 @@ function popup(p) {
   return `<div class="pop"><h2>${esc(p.title)}</h2><p><span class="c">${esc(p.category || "Autre")}</span>${esc(p.locality)}</p><p>${p.dates.map(when).join("<br>")}</p>` +
     (img ? `<img src="${esc(img)}" alt="" loading="lazy">` : "") +
     (p.description ? `<p>${esc(p.description)}${p.description.length >= 300 ? "…" : ""}</p>` : "") +
-    (url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">Plus d’informations</a></p>` : "") + `</div>`;
+    (url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">Plus d’informations</a></p>` : "") +
+    (p.source === "Visiteur" ? `<p class="note">Proposé par un visiteur, non vérifié. <button type="button" class="rep" data-id="${esc(p.id)}">Signaler</button></p>` : "") + `</div>`;
 }
 
 function render() {
@@ -122,11 +155,11 @@ function render() {
   cluster.clearLayers();
   const list = $("list"); list.innerHTML = "";
   for (const it of items) {
-    it.marker = L.circleMarker([it.lat, it.lon], {radius: 8, weight: 2, color: "#14494f", fillColor: "#1f6f78", fillOpacity: .9}).bindPopup(popup(it.p), {maxWidth: 280});
+    it.marker = L.circleMarker([it.lat, it.lon], {radius: 8, weight: 2, color: "#14494f", fillColor: it.p.source === "Visiteur" ? "#c9871a" : "#1f6f78", fillOpacity: .9}).bindPopup(popup(it.p), {maxWidth: 280});
     cluster.addLayer(it.marker);
     const li = document.createElement("li"), b = document.createElement("button");
     b.type = "button";
-    b.innerHTML = `<div class="t">${esc(it.p.title)}</div><div class="m"><span class="c">${esc(it.p.category || "Autre")}</span>${esc(it.p.locality)}${it.dist != null ? " · " + it.dist.toFixed(1).replace(".", ",") + " km" : ""}</div><div class="m">${when(it.p.dates[0])}</div>`;
+    b.innerHTML = `<div class="t">${esc(it.p.title)}</div><div class="m"><span class="c">${esc(it.p.category || "Autre")}</span>${esc(it.p.locality)}${it.p.source === "Visiteur" ? " · proposé par un visiteur" : ""}${it.dist != null ? " · " + it.dist.toFixed(1).replace(".", ",") + " km" : ""}</div><div class="m">${when(it.p.dates[0])}</div>`;
     b.addEventListener("click", () => {
       if (window.innerWidth <= 800) $("map").scrollIntoView({behavior: "smooth"});
       cluster.zoomToShowLayer(it.marker, () => it.marker.openPopup());
@@ -157,8 +190,8 @@ async function fromSupabase() {
   const seen = encodeURIComponent(new Date(Date.now() - 3 * 864e5).toISOString());
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
-    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,category,last_seen` +
-      `&last_end=gte.${today}&last_seen=gte.${seen}&order=first_start.asc&limit=1000&offset=${offset}`;
+    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,category,source,last_seen` +
+      `&last_end=gte.${today}&or=(last_seen.gte.${seen},source.eq.Visiteur)&order=first_start.asc&limit=1000&offset=${offset}`;
     const r = await fetch(url, {headers: {apikey: SB_KEY}});
     if (!r.ok) throw new Error(r.status);
     const page = await r.json();
@@ -173,16 +206,52 @@ async function fromSupabase() {
 }
 const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
 
+function load() {
 fromSupabase().catch(fromFile).then(data => {
   features = data.features || [];
+  const sel = $("cat"), keep = sel.value; sel.length = 1;
   const counts = {};
   features.forEach(f => { const c = f.properties.category || "Autre"; counts[c] = (counts[c] || 0) + 1; });
   Object.keys(counts).sort((a, b) => (a === "Autre") - (b === "Autre") || a.localeCompare(b, "fr")).forEach(c => {
     const o = document.createElement("option"); o.value = c; o.textContent = `${c} (${counts[c]})`; $("cat").appendChild(o);
   });
+  sel.value = keep;
   if (data.generated_at) $("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
   render();
 }).catch(() => { $("count").textContent = "Les événements n’ont pas pu être chargés. Réessayez plus tard."; });
+}
+load();
+
+const FN_URL = SB_URL + "/functions/v1/submit-event", TS_SITEKEY = "0x4AAAAAAF4mxkkqaTwBX9iN";
+let tsId = null, tsToken = "";
+const dlg = $("dlg"), form = $("form"), fmsg = $("fmsg");
+const post = body => fetch(FN_URL, {method: "POST", headers: {"Content-Type": "application/json", apikey: SB_KEY}, body: JSON.stringify(body)})
+  .then(async r => { let d = {}; try { d = await r.json(); } catch (_) {} if (!r.ok) throw new Error(d.error || "Erreur " + r.status); return d; });
+
+$("add").addEventListener("click", () => {
+  fmsg.textContent = ""; dlg.showModal();
+  form.date_start.min = iso(new Date());
+  if (window.turnstile && tsId === null) tsId = turnstile.render("#ts", {sitekey: TS_SITEKEY, callback: t => tsToken = t, "expired-callback": () => tsToken = ""});
+  else if (!window.turnstile) fmsg.textContent = "Le test anti-robot n’a pas pu se charger. Rechargez la page.";
+});
+$("cancel").addEventListener("click", () => dlg.close());
+form.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  if (!tsToken) { fmsg.textContent = "Validez d’abord le test anti-robot."; return; }
+  $("send").disabled = true; fmsg.textContent = "Envoi en cours…";
+  try {
+    const d = await post({action: "submit", token: tsToken, event: Object.fromEntries(new FormData(form).entries())});
+    fmsg.textContent = d.message || "Merci !"; form.reset();
+    setTimeout(() => { dlg.close(); load(); }, 1500);
+  } catch (e) { fmsg.textContent = e.message; }
+  finally { $("send").disabled = false; if (window.turnstile && tsId !== null) { turnstile.reset(tsId); tsToken = ""; } }
+});
+document.addEventListener("click", async ev => {
+  const b = ev.target.closest(".rep[data-id]"); if (!b) return;
+  b.disabled = true; b.textContent = "Envoi…";
+  try { await post({action: "report", event_id: b.dataset.id}); b.textContent = "Merci, signalé"; }
+  catch (_) { b.textContent = "Échec, réessayez"; b.disabled = false; }
+});
 
 ["q", "period", "cat", "radius"].forEach(id => $(id).addEventListener(id === "q" ? "input" : "change", render));
 </script>
