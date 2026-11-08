@@ -1,5 +1,6 @@
 """Transforme un événement DATAtourisme brut en fiche simple pour la carte."""
 import re
+import unicodedata
 from datetime import date
 
 
@@ -35,6 +36,34 @@ def clean_html(value):
 def http_url(value):
     value = text(value)
     return value if value.startswith(("http://", "https://")) else ""
+
+
+CATEGORIES = (
+    ("Festival", ("festival",)),
+    ("Concert et musique", ("concert", "music")),
+    ("Marché et foire", ("market", "marche", "brocante", "fair", "foire", "salon", "sale", "vide")),
+    ("Spectacle", ("spectacle", "theat", "dance", "cirque", "circus", "comedy", "humour")),
+    ("Exposition et culture", ("exhibition", "exposition", "conference", "cultur", "visit", "heritage", "patrimoine")),
+    ("Sport et nature", ("sport", "race", "competition", "course", "rando", "hike", "nature", "trail", "cycl")),
+    ("Gastronomie", ("food", "gastronom", "wine", "vin", "tasting", "degustation")),
+    ("Fête et animation", ("celebration", "fete", "animation", "carnival", "parade", "feast", "social", "bal")),
+)
+
+
+def type_names(raw):
+    names = []
+    for t in as_list(raw.get("type")) + [x for x in (raw.get("type") if isinstance(raw.get("type"), list) else []) if isinstance(x, str)]:
+        if isinstance(t, str):
+            names.append(re.split(r"[#/:]", t)[-1])
+    return list(dict.fromkeys(names))
+
+
+def categorize(names):
+    flat = [unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode().lower() for n in names]
+    for label, keys in CATEGORIES:
+        if any(k in n for n in flat for k in keys):
+            return label
+    return "Autre"
 
 
 def normalize(raw, today=None):
@@ -94,6 +123,8 @@ def normalize(raw, today=None):
         "description": description[:300],
         "image": image,
         "url": url,
+        "category": categorize(type_names(raw)),
+        "raw_types": type_names(raw),
         "lon": lon,
         "lat": lat,
     }, None

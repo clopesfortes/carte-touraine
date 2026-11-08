@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenda Touraine – les événements sur la carte</title>
+<meta name="description" content="Tous les événements à venir en Touraine (Indre-et-Loire), sur une carte.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
+<style>
+:root{--ink:#1d2b2a;--paper:#f6f8f5;--loire:#1f6f78;--tuffeau:#e9e2cf;--line:#d4d9d0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;font:16px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper)}
+header{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:.6rem 1rem;background:var(--tuffeau);border-bottom:2px solid var(--loire)}
+h1{margin:0;font:700 1.3rem Georgia,serif}
+.filters{display:flex;flex-wrap:wrap;gap:.4rem;margin-left:auto}
+input,select,button.near{font:inherit;padding:.4rem .6rem;border:1px solid #8a9a9a;border-radius:4px;background:#fff;color:var(--ink)}
+button.near{background:var(--loire);color:#fff;border-color:var(--loire);cursor:pointer}
+:focus-visible{outline:3px solid var(--loire);outline-offset:1px}
+main{flex:1;min-height:0;display:flex}
+#side{width:360px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:#fff}
+#count{padding:.5rem .8rem;font-size:.9rem;border-bottom:1px solid var(--line)}
+#list{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+#list li button{display:block;width:100%;text-align:left;padding:.6rem .8rem;border:0;border-bottom:1px solid var(--line);background:none;font:inherit;color:inherit;cursor:pointer}
+#list li button:hover{background:var(--paper)}
+.t{font-weight:600}.m{font-size:.85rem;color:#4b5b5a}.c{display:inline-block;font-size:.72rem;background:var(--tuffeau);border-radius:3px;padding:0 .35rem;margin-right:.3rem}
+#map{flex:1;min-height:0}
+.pop h2{margin:0 0 .2rem;font:700 1rem Georgia,serif}
+.pop p{margin:.25rem 0}.pop img{max-width:100%;max-height:120px;border-radius:3px}
+footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
+@media (max-width:800px){
+  html,body{height:auto}
+  main{flex-direction:column}
+  #map{order:-1;flex:none;height:55vh}
+  #side{width:auto;border-right:0}
+  #list{overflow:visible}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Agenda Touraine</h1>
+  <div class="filters">
+    <input id="q" type="search" placeholder="Titre ou commune" aria-label="Rechercher un événement ou une commune">
+    <select id="period" aria-label="Période">
+      <option value="all">Toutes les dates</option>
+      <option value="today">Aujourd’hui</option>
+      <option value="weekend">Ce week-end</option>
+      <option value="7">7 prochains jours</option>
+      <option value="30">30 prochains jours</option>
+    </select>
+    <select id="cat" aria-label="Catégorie"><option value="">Toutes catégories</option></select>
+    <button class="near" id="near" type="button">Autour de moi</button>
+    <select id="radius" aria-label="Distance" hidden>
+      <option value="0">Toute distance</option><option value="5">5 km</option><option value="10" selected>10 km</option><option value="25">25 km</option>
+    </select>
+  </div>
+</header>
+<main>
+  <aside id="side"><div id="count" role="status">Chargement…</div><ul id="list"></ul></aside>
+  <div id="map"></div>
+</main>
+<footer>
+  Données : DATAtourisme, <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/">Licence Ouverte 2.0</a>.
+  Fond de carte © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>. <span id="updated"></span>
+</footer>
+<noscript>Cette carte nécessite JavaScript.</noscript>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const fmt = s => new Date(s + "T00:00").toLocaleDateString("fr-FR", {weekday:"short", day:"numeric", month:"short"});
+const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const httpOnly = u => /^https?:\/\//i.test(u || "") ? u : "";
+const km = (a, b) => { const r = x => x * Math.PI / 180, h = Math.sin(r(b[0]-a[0])/2)**2 + Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(r(b[1]-a[1])/2)**2; return 12742 * Math.asin(Math.sqrt(h)); };
+
+const map = L.map("map").setView([47.3941, 0.6848], 9);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
+const cluster = L.markerClusterGroup({showCoverageOnHover: false}).addTo(map);
+let features = [], me = null, meMarker = null;
+
+function range(period) {
+  const now = new Date(), from = new Date(now), to = new Date(now);
+  if (period === "today") return [iso(from), iso(to)];
+  if (period === "weekend") {
+    const day = now.getDay();
+    if (day === 0) return [iso(now), iso(now)];
+    from.setDate(now.getDate() + (6 - day)); to.setTime(from.getTime()); to.setDate(from.getDate() + 1);
+    return [iso(from), iso(to)];
+  }
+  if (period === "7" || period === "30") { to.setDate(now.getDate() + Number(period)); return [iso(from), iso(to)]; }
+  return null;
+}
+const when = d => (d.start === d.end ? fmt(d.start) : `${fmt(d.start)} → ${fmt(d.end)}`) + (d.time ? ` à ${esc(d.time)}` : "");
+
+function popup(p) {
+  const url = httpOnly(p.url), img = httpOnly(p.image);
+  return `<div class="pop"><h2>${esc(p.title)}</h2><p><span class="c">${esc(p.category || "Autre")}</span>${esc(p.locality)}</p><p>${p.dates.map(when).join("<br>")}</p>` +
+    (img ? `<img src="${esc(img)}" alt="" loading="lazy">` : "") +
+    (p.description ? `<p>${esc(p.description)}${p.description.length >= 300 ? "…" : ""}</p>` : "") +
+    (url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">Plus d’informations</a></p>` : "") + `</div>`;
+}
+
+function render() {
+  const q = norm($("q").value.trim()), r = range($("period").value), cat = $("cat").value, radius = Number($("radius").value);
+  let items = [];
+  for (const f of features) {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    if (q && !norm(p.title + " " + p.locality).includes(q)) continue;
+    if (cat && (p.category || "Autre") !== cat) continue;
+    if (r && !p.dates.some(d => d.start <= r[1] && d.end >= r[0])) continue;
+    const dist = me ? km(me, [lat, lon]) : null;
+    if (me && radius && dist > radius) continue;
+    items.push({f, p, lat, lon, dist});
+  }
+  if (me) items.sort((a, b) => a.dist - b.dist);
+
+  cluster.clearLayers();
+  const list = $("list"); list.innerHTML = "";
+  for (const it of items) {
+    it.marker = L.circleMarker([it.lat, it.lon], {radius: 8, weight: 2, color: "#14494f", fillColor: "#1f6f78", fillOpacity: .9}).bindPopup(popup(it.p), {maxWidth: 280});
+    cluster.addLayer(it.marker);
+    const li = document.createElement("li"), b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = `<div class="t">${esc(it.p.title)}</div><div class="m"><span class="c">${esc(it.p.category || "Autre")}</span>${esc(it.p.locality)}${it.dist != null ? " · " + it.dist.toFixed(1).replace(".", ",") + " km" : ""}</div><div class="m">${when(it.p.dates[0])}</div>`;
+    b.addEventListener("click", () => {
+      if (window.innerWidth <= 800) $("map").scrollIntoView({behavior: "smooth"});
+      cluster.zoomToShowLayer(it.marker, () => it.marker.openPopup());
+    });
+    li.appendChild(b); list.appendChild(li);
+  }
+  $("count").textContent = items.length === 0 ? "Aucun événement pour ces critères." : `${items.length} événement${items.length > 1 ? "s" : ""}${me ? " autour de vous" : ""}`;
+}
+
+$("near").addEventListener("click", () => {
+  if (!navigator.geolocation) { $("count").textContent = "La localisation n’est pas disponible sur cet appareil."; return; }
+  $("count").textContent = "Localisation en cours…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    me = [pos.coords.latitude, pos.coords.longitude];
+    if (meMarker) meMarker.remove();
+    meMarker = L.circleMarker(me, {radius: 9, color: "#fff", weight: 3, fillColor: "#d9480f", fillOpacity: 1}).addTo(map).bindTooltip("Vous êtes ici");
+    $("radius").hidden = false;
+    map.setView(me, 11);
+    render();
+  }, () => { $("count").textContent = "Localisation refusée ou impossible. Autorisez-la dans votre navigateur pour utiliser « Autour de moi »."; render(); }, {timeout: 15000});
+});
+
+const SB_URL = "https://tvuxgyweuecdkbhfdduq.supabase.co";
+const SB_KEY = "sb_publishable_PNxoKVYUvO7TiDY4EyB_8A_OFgztynM";
+
+async function fromSupabase() {
+  const today = iso(new Date());
+  const seen = encodeURIComponent(new Date(Date.now() - 3 * 864e5).toISOString());
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,category,last_seen` +
+      `&last_end=gte.${today}&last_seen=gte.${seen}&order=first_start.asc&limit=1000&offset=${offset}`;
+    const r = await fetch(url, {headers: {apikey: SB_KEY}});
+    if (!r.ok) throw new Error(r.status);
+    const page = await r.json();
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  if (!rows.length) throw new Error("vide");
+  return {
+    generated_at: rows.map(x => x.last_seen).sort().pop(),
+    features: rows.map(({lat, lon, last_seen, ...p}) => ({type: "Feature", geometry: {coordinates: [lon, lat]}, properties: p}))
+  };
+}
+const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+fromSupabase().catch(fromFile).then(data => {
+  features = data.features || [];
+  const counts = {};
+  features.forEach(f => { const c = f.properties.category || "Autre"; counts[c] = (counts[c] || 0) + 1; });
+  Object.keys(counts).sort((a, b) => (a === "Autre") - (b === "Autre") || a.localeCompare(b, "fr")).forEach(c => {
+    const o = document.createElement("option"); o.value = c; o.textContent = `${c} (${counts[c]})`; $("cat").appendChild(o);
+  });
+  if (data.generated_at) $("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
+  render();
+}).catch(() => { $("count").textContent = "Les événements n’ont pas pu être chargés. Réessayez plus tard."; });
+
+["q", "period", "cat", "radius"].forEach(id => $(id).addEventListener(id === "q" ? "input" : "change", render));
+</script>
+</body>
+</html>

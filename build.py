@@ -25,13 +25,17 @@ def main():
     if total is not None and len(raw_events) < total:
         sys.exit(f"ERREUR : collecte incomplète ({len(raw_events)}/{total}), le site n'est pas modifié.")
 
-    rejected, features = Counter(), []
+    rejected, features, categories, unmatched = Counter(), [], Counter(), Counter()
     for raw in raw_events:
         event, reason = normalize(raw)
         if reason:
             rejected[reason] += 1
             continue
         lon, lat = event.pop("lon"), event.pop("lat")
+        raw_types = event.pop("raw_types")
+        categories[event["category"]] += 1
+        if event["category"] == "Autre":
+            unmatched.update(raw_types)
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
@@ -51,6 +55,8 @@ def main():
 
     print(f"{len(raw_events)} reçus, {len(features)} publiables.")
     print(f"Écartés : {dict(rejected) or 'aucun'}")
+    print(f"Catégories : {dict(categories)}")
+    print(f"Types non reconnus (classés « Autre ») : {dict(unmatched.most_common(10)) or 'aucun'}")
 
     try:
         supabase = config.load_supabase()
@@ -72,6 +78,7 @@ def main():
             "first_start": min(d["start"] for d in p["dates"]),
             "last_end": max(d["end"] for d in p["dates"]),
             "description": p["description"], "image": p["image"], "url": p["url"],
+            "category": p["category"],
             "last_seen": now,
         }
     try:
