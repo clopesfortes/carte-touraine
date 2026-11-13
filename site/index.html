@@ -40,6 +40,12 @@ dialog input,dialog select,dialog textarea{width:100%;font:inherit;padding:.4rem
 .hp{position:absolute;left:-9999px}
 #fmsg{min-height:1.4rem;margin:.5rem 0;font-size:.9rem}
 .small{font-size:.8rem;color:#4b5b5a}
+header{position:relative;z-index:1100}
+.combo{position:relative}
+#sugg{position:absolute;z-index:1200;top:100%;left:0;right:0;min-width:15rem;margin:2px 0 0;padding:0;list-style:none;background:#fff;border:1px solid #8a9a9a;border-radius:4px;max-height:16rem;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.18)}
+#sugg li{padding:.45rem .7rem;cursor:pointer}
+#sugg li[aria-selected="true"],#sugg li:hover{background:var(--tuffeau)}
+#sugg small{color:#4b5b5a}
 footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
 @media (max-width:800px){
   html,body{height:auto}
@@ -54,7 +60,7 @@ footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
 <header>
   <h1>Agenda Touraine</h1>
   <div class="filters">
-    <input id="q" type="search" placeholder="Titre ou commune" aria-label="Rechercher un événement ou une commune">
+    <div class="combo"><input id="q" type="search" role="combobox" aria-expanded="false" aria-controls="sugg" aria-autocomplete="list" autocomplete="off" placeholder="Commune ou titre…" aria-label="Rechercher une commune ou un événement"><ul id="sugg" role="listbox" hidden></ul></div>
     <select id="period" aria-label="Période">
       <option value="all">Toutes les dates</option>
       <option value="today">Aujourd’hui</option>
@@ -83,7 +89,7 @@ footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
     <h2>Proposer un événement</h2>
     <p class="small">Votre proposition est contrôlée automatiquement, puis publiée avec la mention « proposé par un visiteur, non vérifié ». Elle peut être masquée si elle est signalée. N’indiquez aucune donnée personnelle.</p>
     <label for="f-title">Titre *</label><input id="f-title" name="title" required minlength="5" maxlength="100">
-    <div class="row"><div><label for="f-loc">Commune *</label><input id="f-loc" name="locality" required maxlength="60"></div>
+    <div class="row"><div><label for="f-loc">Commune *</label><input id="f-loc" name="locality" required maxlength="60" list="dl-communes" autocomplete="off"><datalist id="dl-communes"></datalist></div>
     <div><label for="f-cat">Catégorie</label><select id="f-cat" name="category"><option>Fête et animation</option><option>Marché et foire</option><option>Concert et musique</option><option>Spectacle</option><option>Exposition et culture</option><option>Sport et nature</option><option>Gastronomie</option><option>Festival</option><option>Autre</option></select></div></div>
     <label for="f-addr">Adresse ou lieu (facultatif)</label><input id="f-addr" name="address" maxlength="120" placeholder="ex. Salle des fêtes, rue de la Mairie">
     <div class="row"><div><label for="f-ds">Date *</label><input id="f-ds" name="date_start" type="date" required></div>
@@ -106,14 +112,15 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const fmt = s => new Date(s + "T00:00").toLocaleDateString("fr-FR", {weekday:"short", day:"numeric", month:"short"});
-const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/œ/g, "oe").replace(/[^a-z0-9]+/g, " ").trim().replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte");
 const httpOnly = u => /^https?:\/\//i.test(u || "") ? u : "";
 const km = (a, b) => { const r = x => x * Math.PI / 180, h = Math.sin(r(b[0]-a[0])/2)**2 + Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(r(b[1]-a[1])/2)**2; return 12742 * Math.asin(Math.sqrt(h)); };
 
 const map = L.map("map").setView([47.3941, 0.6848], 9);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
 const cluster = L.markerClusterGroup({showCoverageOnHover: false}).addTo(map);
-let features = [], me = null, meMarker = null;
+let features = [], me = null, meMarker = null, commune = null;
+const communes = new Map();
 
 function range(period) {
   const now = new Date(), from = new Date(now), to = new Date(now);
@@ -143,7 +150,8 @@ function render() {
   let items = [];
   for (const f of features) {
     const p = f.properties, [lon, lat] = f.geometry.coordinates;
-    if (q && !norm(p.title + " " + p.locality).includes(q)) continue;
+    if (commune) { if (norm(p.locality) !== commune) continue; }
+    else if (q && !norm(p.title + " " + p.locality).includes(q)) continue;
     if (cat && (p.category || "Autre") !== cat) continue;
     if (r && !p.dates.some(d => d.start <= r[1] && d.end >= r[0])) continue;
     const dist = me ? km(me, [lat, lon]) : null;
@@ -209,6 +217,7 @@ const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { 
 function load() {
 fromSupabase().catch(fromFile).then(data => {
   features = data.features || [];
+  buildCommunes();
   const sel = $("cat"), keep = sel.value; sel.length = 1;
   const counts = {};
   features.forEach(f => { const c = f.properties.category || "Autre"; counts[c] = (counts[c] || 0) + 1; });
@@ -221,6 +230,46 @@ fromSupabase().catch(fromFile).then(data => {
 }).catch(() => { $("count").textContent = "Les événements n’ont pas pu être chargés. Réessayez plus tard."; });
 }
 load();
+
+function buildCommunes() {
+  communes.clear();
+  for (const f of features) {
+    const p = f.properties, k = norm(p.locality);
+    if (!k) continue;
+    const c = communes.get(k) || {name: p.locality, count: 0, lat: 0, lon: 0};
+    c.count++; c.lat += f.geometry.coordinates[1]; c.lon += f.geometry.coordinates[0];
+    communes.set(k, c);
+  }
+  $("dl-communes").innerHTML = [...communes.values()].map(c => c.name).sort((a, b) => a.localeCompare(b, "fr")).map(n => `<option value="${esc(n)}">`).join("");
+}
+const sugg = $("sugg");
+let current = [], active = -1;
+function hideSugg() { sugg.hidden = true; active = -1; $("q").setAttribute("aria-expanded", "false"); }
+function showSugg() {
+  const qn = norm($("q").value);
+  if (!qn) return hideSugg();
+  current = [...communes.entries()]
+    .map(([k, c]) => ({k, c, s: k.startsWith(qn) ? 0 : (" " + k).includes(" " + qn) ? 1 : k.includes(qn) ? 2 : 9}))
+    .filter(x => x.s < 9).sort((a, b) => a.s - b.s || b.c.count - a.c.count).slice(0, 8);
+  sugg.innerHTML = current.map((x, i) => `<li role="option" id="o${i}" data-k="${esc(x.k)}">${esc(x.c.name)} <small>· ${x.c.count} événement${x.c.count > 1 ? "s" : ""}</small></li>`).join("");
+  active = -1; sugg.hidden = !current.length; $("q").setAttribute("aria-expanded", String(!!current.length));
+}
+function choose(k) {
+  const c = communes.get(k); if (!c) return;
+  commune = k; $("q").value = c.name; hideSugg();
+  map.setView([c.lat / c.count, c.lon / c.count], 12);
+  render();
+}
+function mark() { [...sugg.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === active))); }
+$("q").addEventListener("input", () => { commune = null; showSugg(); render(); });
+$("q").addEventListener("keydown", ev => {
+  if (ev.key === "ArrowDown" && current.length) { ev.preventDefault(); active = (active + 1) % current.length; mark(); }
+  else if (ev.key === "ArrowUp" && current.length) { ev.preventDefault(); active = (active - 1 + current.length) % current.length; mark(); }
+  else if (ev.key === "Enter" && !sugg.hidden && current.length) { ev.preventDefault(); choose(current[Math.max(active, 0)].k); }
+  else if (ev.key === "Escape") hideSugg();
+});
+sugg.addEventListener("mousedown", ev => { const li = ev.target.closest("li"); if (li) { ev.preventDefault(); choose(li.dataset.k); } });
+document.addEventListener("click", ev => { if (!ev.target.closest(".combo")) hideSugg(); });
 
 const FN_URL = SB_URL + "/functions/v1/super-responder", TS_SITEKEY = "0x4AAAAAAF4mxkkqaTwBX9iN";
 let tsId = null, tsToken = "";
@@ -253,7 +302,7 @@ document.addEventListener("click", async ev => {
   catch (_) { b.textContent = "Échec, réessayez"; b.disabled = false; }
 });
 
-["q", "period", "cat", "radius"].forEach(id => $(id).addEventListener(id === "q" ? "input" : "change", render));
+["period", "cat", "radius"].forEach(id => $(id).addEventListener("change", render));
 </script>
 </body>
 </html>
