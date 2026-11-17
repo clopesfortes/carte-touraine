@@ -39,13 +39,13 @@ def _get(url, api_key, attempts=3):
     raise DatatourismeError(f"Échec après {attempts} tentatives : {last}")
 
 
-def fetch_events(cfg):
+def fetch_events(cfg, department=None):
     """Retourne (liste d'événements bruts, total annoncé par l'API)."""
     endpoint = f"{cfg['base_url']}/{cfg['endpoint']}"
     host = urlparse(cfg["base_url"]).hostname
     params = {
         "filters": "isLocatedAt.address.hasAddressCity.isPartOfDepartment.insee[eq]="
-                   + cfg["department"],
+                   + (department or cfg["department"]),
         "page": 1,
         "page_size": cfg["page_size"],
         "lang": "fr",

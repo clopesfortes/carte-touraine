@@ -3,6 +3,8 @@ import configparser
 import os
 from pathlib import Path
 
+import regions
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -33,7 +35,19 @@ def load():
     except ValueError:
         page_size = 100
 
+    wanted = os.environ.get("DEPARTMENTS", "").strip() or get("departments", get("department", "37"))
+    if wanted.lower() in ("all", "tous", "france"):
+        departments = regions.all_departments()
+    else:
+        departments = [d.strip().upper() for d in wanted.split(",") if d.strip()]
+    try:
+        budget = int(os.environ.get("DAILY_REQUESTS", "") or get("daily_requests", "400"))
+    except ValueError:
+        budget = 400
+
     return {
+        "departments": departments,
+        "budget": budget,
         "api_key": api_key,
         "base_url": base_url,
         "endpoint": get("endpoint", "entertainmentAndEvent"),
