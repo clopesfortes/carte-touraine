@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Événements en Touraine : la carte des sorties – Agenda Touraine</title>
+<meta name="description" content="Que faire en Touraine ? Carte interactive de tous les événements à venir en Indre-et-Loire : marchés, concerts, spectacles, fêtes. Cherchez par commune, date ou autour de vous.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
+<style>
+:root{--ink:#1d2b2a;--paper:#f6f8f5;--loire:#1f6f78;--tuffeau:#e9e2cf;--line:#d4d9d0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;font:16px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper)}
+header{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:.6rem 1rem;background:var(--tuffeau);border-bottom:2px solid var(--loire)}
+h1{margin:0;font:700 1.3rem Georgia,serif}
+.filters{display:flex;flex-wrap:wrap;gap:.4rem;margin-left:auto}
+input,select,button.near{font:inherit;padding:.4rem .6rem;border:1px solid #8a9a9a;border-radius:4px;background:#fff;color:var(--ink)}
+button.near{background:var(--loire);color:#fff;border-color:var(--loire);cursor:pointer}
+:focus-visible{outline:3px solid var(--loire);outline-offset:1px}
+main{flex:1;min-height:0;display:flex}
+#side{width:360px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:#fff}
+#count{padding:.5rem .8rem;font-size:.9rem;border-bottom:1px solid var(--line)}
+#list{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+#list li button{display:block;width:100%;text-align:left;padding:.6rem .8rem;border:0;border-bottom:1px solid var(--line);background:none;font:inherit;color:inherit;cursor:pointer}
+#list li button:hover{background:var(--paper)}
+.t{font-weight:600}.m{font-size:.85rem;color:#4b5b5a}.c{display:inline-block;font-size:.72rem;background:var(--tuffeau);border-radius:3px;padding:0 .35rem;margin-right:.3rem}
+#map{flex:1;min-height:0}
+.pop h2{margin:0 0 .2rem;font:700 1rem Georgia,serif}
+.pop p{margin:.25rem 0}.pop img{max-width:100%;max-height:120px;border-radius:3px}
+.note{font-size:.8rem;color:#6a4b00}
+.rep{font:inherit;font-size:.8rem;padding:.1rem .5rem;border:1px solid #8a9a9a;border-radius:4px;background:#fff;cursor:pointer}
+dialog{width:min(520px,94vw);border:1px solid var(--line);border-radius:8px;padding:1rem 1.2rem}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{margin:0 0 .5rem;font:700 1.15rem Georgia,serif}
+dialog label{display:block;margin:.5rem 0 .1rem;font-size:.9rem}
+dialog input,dialog select,dialog textarea{width:100%;font:inherit;padding:.4rem .6rem;border:1px solid #8a9a9a;border-radius:4px}
+.row{display:flex;gap:.6rem}.row>div{flex:1}
+.hp{position:absolute;left:-9999px}
+#fmsg{min-height:1.4rem;margin:.5rem 0;font-size:.9rem}
+.small{font-size:.8rem;color:#4b5b5a}
+header{position:relative;z-index:1100}
+.combo{position:relative}
+#sugg{position:absolute;z-index:1200;top:100%;left:0;right:0;min-width:15rem;margin:2px 0 0;padding:0;list-style:none;background:#fff;border:1px solid #8a9a9a;border-radius:4px;max-height:16rem;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.18)}
+#sugg li{padding:.45rem .7rem;cursor:pointer}
+#sugg li[aria-selected="true"],#sugg li:hover{background:var(--tuffeau)}
+#sugg small{color:#4b5b5a}
+#communes-seo p{max-height:28vh;overflow:auto;margin:.4rem 0 0}
+footer{padding:.4rem 1rem;font-size:.78rem;background:var(--tuffeau)}
+@media (max-width:800px){
+  html,body{height:auto}
+  main{flex-direction:column}
+  #map{order:-1;flex:none;height:55vh}
+  #side{width:auto;border-right:0}
+  #list{overflow:visible}
+}
+</style>
+<style>
+header{background:#fff;border-bottom:1px solid var(--line);box-shadow:0 1px 6px rgba(0,0,0,.07)}
+h1{color:var(--loire)}
+input,select,button.near{border-radius:999px;padding:.45rem .9rem}
+#side{background:var(--paper)}
+#count{background:#fff;font-weight:600}
+#ctx{padding:0 .9rem;background:#fff}
+#ctx:not(:empty){padding:.55rem .9rem;border-bottom:1px solid var(--line)}
+.crumb{font-size:.85rem;color:#4b5b5a}.crumb b{color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.45rem}
+.chip{font:inherit;font-size:.8rem;padding:.2rem .75rem;border:1px solid var(--loire);border-radius:999px;background:#fff;color:var(--loire);cursor:pointer}
+.chip:hover{background:var(--loire);color:#fff}
+#list li{padding:.4rem .6rem 0}
+#list li button.card{display:flex;gap:.7rem;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fff;padding:.55rem .7rem}
+#list li button.card:hover{border-color:var(--c);box-shadow:0 2px 8px rgba(0,0,0,.1);background:#fff}
+.badge{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;width:2.8rem;height:2.8rem;border-radius:8px;background:var(--c);color:#fff;line-height:1.05}
+.badge b{font-size:1.1rem}.badge small{font-size:.65rem;text-transform:uppercase}
+.body{display:flex;flex-direction:column;min-width:0}
+.body .t{font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.3rem}
+#list li.more{padding:.7rem .9rem;font-size:.85rem;color:#4b5b5a}
+</style>
+</head>
+<body>
+<header>
+  <h1>Agenda Touraine</h1>
+  <div class="filters">
+    <div class="combo"><input id="q" type="search" role="combobox" aria-expanded="false" aria-controls="sugg" aria-autocomplete="list" autocomplete="off" placeholder="Commune ou titre…" aria-label="Rechercher une commune ou un événement"><ul id="sugg" role="listbox" hidden></ul></div>
+    <select id="period" aria-label="Période">
+      <option value="all">Toutes les dates</option>
+      <option value="today">Aujourd’hui</option>
+      <option value="weekend">Ce week-end</option>
+      <option value="7">7 prochains jours</option>
+      <option value="30">30 prochains jours</option>
+    </select>
+    <select id="cat" aria-label="Catégorie"><option value="">Toutes catégories</option></select>
+    <button class="near" id="near" type="button">Autour de moi</button>
+    <button class="near" id="add" type="button">Proposer un événement</button>
+    <select id="radius" aria-label="Distance" hidden>
+      <option value="0">Toute distance</option><option value="5">5 km</option><option value="10" selected>10 km</option><option value="25">25 km</option>
+    </select>
+  </div>
+</header>
+<main>
+  <aside id="side"><div id="count" role="status">Chargement…</div><div id="ctx"></div><ul id="list"></ul></aside>
+  <div id="map"></div>
+</main>
+<footer>
+  Données : DATAtourisme, <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/">Licence Ouverte 2.0</a>.
+  Fond de carte © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>. <span id="updated"></span> <a href="mentions.html">Mentions légales et contact</a>
+  <!--COMMUNES--><!--/COMMUNES-->
+</footer>
+<dialog id="dlg">
+  <form id="form">
+    <h2>Proposer un événement</h2>
+    <p class="small">Votre proposition est contrôlée automatiquement, puis publiée avec la mention « proposé par un visiteur, non vérifié ». Elle peut être masquée si elle est signalée. N’indiquez aucune donnée personnelle.</p>
+    <label for="f-title">Titre *</label><input id="f-title" name="title" required minlength="5" maxlength="100">
+    <div class="row"><div><label for="f-loc">Commune *</label><input id="f-loc" name="locality" required maxlength="60" list="dl-communes" autocomplete="off"><datalist id="dl-communes"></datalist></div>
+    <div><label for="f-cat">Catégorie</label><select id="f-cat" name="category"><option>Fête et animation</option><option>Marché et foire</option><option>Concert et musique</option><option>Spectacle</option><option>Exposition et culture</option><option>Sport et nature</option><option>Gastronomie</option><option>Festival</option><option>Autre</option></select></div></div>
+    <label for="f-addr">Adresse ou lieu (facultatif)</label><input id="f-addr" name="address" maxlength="120" placeholder="ex. Salle des fêtes, rue de la Mairie">
+    <div class="row"><div><label for="f-ds">Date *</label><input id="f-ds" name="date_start" type="date" required></div>
+    <div><label for="f-de">Fin (facultatif)</label><input id="f-de" name="date_end" type="date"></div>
+    <div><label for="f-t">Heure</label><input id="f-t" name="time" type="time"></div></div>
+    <label for="f-desc">Description (facultatif)</label><textarea id="f-desc" name="description" rows="3" maxlength="500"></textarea>
+    <label for="f-url">Lien d’information (facultatif)</label><input id="f-url" name="url" type="url" maxlength="200" placeholder="https://…">
+    <div class="hp" aria-hidden="true"><label>Site web<input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <div id="ts" style="margin-top:.6rem"></div>
+    <div id="fmsg" role="status"></div>
+    <div class="row"><button class="near" id="send" type="submit">Envoyer</button><button class="rep" id="cancel" type="button">Annuler</button></div>
+  </form>
+</dialog>
+<noscript>Cette carte nécessite JavaScript.</noscript>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const fmt = s => new Date(s + "T00:00").toLocaleDateString("fr-FR", {weekday:"short", day:"numeric", month:"short"});
+const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/œ/g, "oe").replace(/[^a-z0-9]+/g, " ").trim().replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte");
+const httpOnly = u => /^https?:\/\//i.test(u || "") ? u : "";
+const km = (a, b) => { const r = x => x * Math.PI / 180, h = Math.sin(r(b[0]-a[0])/2)**2 + Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(r(b[1]-a[1])/2)**2; return 12742 * Math.asin(Math.sqrt(h)); };
+
+const map = L.map("map").setView([47.3941, 0.6848], 9);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
+const cluster = L.markerClusterGroup({showCoverageOnHover: false}).addTo(map);
+let features = [], me = null, meMarker = null, commune = null;
+const communes = new Map();
+
+function range(period) {
+  const now = new Date(), from = new Date(now), to = new Date(now);
+  if (period === "today") return [iso(from), iso(to)];
+  if (period === "weekend") {
+    const day = now.getDay();
+    if (day === 0) return [iso(now), iso(now)];
+    from.setDate(now.getDate() + (6 - day)); to.setTime(from.getTime()); to.setDate(from.getDate() + 1);
+    return [iso(from), iso(to)];
+  }
+  if (period === "7" || period === "30") { to.setDate(now.getDate() + Number(period)); return [iso(from), iso(to)]; }
+  return null;
+}
+const when = d => (d.start === d.end ? fmt(d.start) : `${fmt(d.start)} → ${fmt(d.end)}`) + (d.time ? ` à ${esc(d.time)}` : "");
+
+function popup(p) {
+  const url = httpOnly(p.url), img = httpOnly(p.image);
+  return `<div class="pop"><h2>${esc(p.title)}</h2><p><span class="c">${esc(p.category || "Autre")}</span>${esc(p.locality)}</p><p>${p.dates.map(when).join("<br>")}</p>` +
+    (img ? `<img src="${esc(img)}" alt="" loading="lazy">` : "") +
+    (p.description ? `<p>${esc(p.description)}${p.description.length >= 300 ? "…" : ""}</p>` : "") +
+    (url ? `<p><a href="${esc(url)}" target="_blank" rel="noopener">Plus d’informations</a></p>` : "") +
+    (p.source === "Visiteur" ? `<p class="note">Proposé par un visiteur, non vérifié. <button type="button" class="rep" data-id="${esc(p.id)}">Signaler</button></p>` : "") + `</div>`;
+}
+
+const catColors = {"Festival": "#b5446e", "Concert et musique": "#7b4bb0", "Marché et foire": "#c9871a", "Spectacle": "#d9480f", "Exposition et culture": "#2f6fb5", "Sport et nature": "#3a8f4f", "Gastronomie": "#a0522d", "Fête et animation": "#1f6f78", "Autre": "#6b7a79"};
+const colorOf = p => catColors[p.category] || catColors["Autre"];
+let items = [], scope = {type: "view"}, moveTimer = null;
+const sameSpot = (it, s) => Math.abs(it.lat - s.lat) < .0015 && Math.abs(it.lon - s.lon) < .0022;
+function inScope(it) {
+  if (scope.type === "commune") return norm(it.p.locality) === scope.key;
+  if (scope.type === "place") return sameSpot(it, scope);
+  return map.getBounds().contains([it.lat, it.lon]);
+}
+function selectPlace(it) {
+  scope = {type: "place", lat: it.lat, lon: it.lon, key: norm(it.p.locality), name: it.p.locality};
+  renderList(); $("list").scrollTop = 0;
+}
+
+function render() {
+  const q = norm($("q").value.trim()), r = range($("period").value), cat = $("cat").value, radius = Number($("radius").value);
+  items = [];
+  for (const f of features) {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    if (!commune && q && !norm(p.title + " " + p.locality).includes(q)) continue;
+    if (cat && (p.category || "Autre") !== cat) continue;
+    if (r && !p.dates.some(d => d.start <= r[1] && d.end >= r[0])) continue;
+    const dist = me ? km(me, [lat, lon]) : null;
+    if (me && radius && dist > radius) continue;
+    items.push({f, p, lat, lon, dist});
+  }
+  if (me) items.sort((a, b) => a.dist - b.dist);
+  cluster.clearLayers();
+  for (const it of items) {
+    const visitor = it.p.source === "Visiteur";
+    it.marker = L.circleMarker([it.lat, it.lon], {radius: 8, weight: visitor ? 3 : 2, color: visitor ? "#8a5a00" : "#fff", fillColor: colorOf(it.p), fillOpacity: .95, bubblingMouseEvents: false})
+      .bindPopup(popup(it.p), {maxWidth: 280});
+    it.marker.on("click", () => selectPlace(it));
+    cluster.addLayer(it.marker);
+  }
+  renderList();
+}
+
+function renderList() {
+  const shown = items.filter(inScope), list = $("list"), place = scope.type === "place";
+  const crumbs = ["Touraine"];
+  if (scope.type !== "view") crumbs.push(`<b>${esc(scope.name)}</b>`);
+  if (place) crumbs.push("ce lieu");
+  let actions = "";
+  if (place) actions += `<button type="button" class="chip" data-act="commune">Voir toute la commune (${items.filter(x => norm(x.p.locality) === scope.key).length})</button>`;
+  if (scope.type !== "view") actions += `<button type="button" class="chip" data-act="back">← Retour à la zone visible</button>`;
+  $("ctx").innerHTML = `<div class="crumb">${crumbs.join(" › ")}</div>` + (actions ? `<div class="chips">${actions}</div>` : "");
+  const what = scope.type === "view" ? "dans la zone visible" : place ? "à cet endroit" : "dans la commune";
+  $("count").textContent = shown.length === 0
+    ? (scope.type === "view" ? "Aucun événement dans cette zone : déplacez ou dézoomez la carte." : "Aucun événement ici pour ces filtres.")
+    : `${shown.length} événement${shown.length > 1 ? "s" : ""} ${what}`;
+  list.innerHTML = "";
+  for (const it of shown.slice(0, 150)) {
+    const d = it.p.dates[0], col = colorOf(it.p), day = new Date(d.start + "T00:00");
+    const li = document.createElement("li"), b = document.createElement("button");
+    b.type = "button"; b.className = "card"; b.style.setProperty("--c", col);
+    b.innerHTML = `<span class="badge"><b>${day.getDate()}</b><small>${esc(day.toLocaleDateString("fr-FR", {month: "short"}).replace(".", ""))}</small></span>` +
+      `<span class="body"><span class="t">${esc(it.p.title)}</span><span class="m"><i class="dot" style="background:${col}"></i>${esc(it.p.category || "Autre")} · ${esc(it.p.locality)}` +
+      `${it.p.source === "Visiteur" ? " · proposé par un visiteur" : ""}${it.dist != null ? " · " + it.dist.toFixed(1).replace(".", ",") + " km" : ""}</span><span class="m">${when(d)}</span></span>`;
+    b.addEventListener("click", () => {
+      selectPlace(it);
+      if (window.innerWidth <= 800) $("map").scrollIntoView({behavior: "smooth"});
+      cluster.zoomToShowLayer(it.marker, () => it.marker.openPopup());
+    });
+    li.appendChild(b); list.appendChild(li);
+  }
+  if (shown.length > 150) { const li = document.createElement("li"); li.className = "more"; li.textContent = `… et ${shown.length - 150} autres : zoomez sur la carte ou ajoutez un filtre.`; list.appendChild(li); }
+}
+
+$("ctx").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-act]"); if (!b) return;
+  if (b.dataset.act === "commune") { choose(scope.key); return; }
+  const wasCommune = scope.type === "commune";
+  scope = {type: "view"}; commune = null;
+  if (wasCommune) $("q").value = "";
+  map.closePopup(); render();
+});
+map.on("moveend", () => { if (scope.type === "view") { clearTimeout(moveTimer); moveTimer = setTimeout(renderList, 120); } });
+map.on("click", () => { if (scope.type === "place") { scope = {type: "view"}; renderList(); } });
+
+$("near").addEventListener("click", () => {
+  if (!navigator.geolocation) { $("count").textContent = "La localisation n’est pas disponible sur cet appareil."; return; }
+  $("count").textContent = "Localisation en cours…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    me = [pos.coords.latitude, pos.coords.longitude];
+    if (meMarker) meMarker.remove();
+    meMarker = L.circleMarker(me, {radius: 9, color: "#fff", weight: 3, fillColor: "#d9480f", fillOpacity: 1}).addTo(map).bindTooltip("Vous êtes ici");
+    $("radius").hidden = false;
+    map.setView(me, 11);
+    render();
+  }, () => { $("count").textContent = "Localisation refusée ou impossible. Autorisez-la dans votre navigateur pour utiliser « Autour de moi »."; render(); }, {timeout: 15000});
+});
+
+const SB_URL = "https://tvuxgyweuecdkbhfdduq.supabase.co";
+const SB_KEY = "sb_publishable_PNxoKVYUvO7TiDY4EyB_8A_OFgztynM";
+
+async function fromSupabase() {
+  const today = iso(new Date());
+  const seen = encodeURIComponent(new Date(Date.now() - 3 * 864e5).toISOString());
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,category,source,last_seen` +
+      `&last_end=gte.${today}&or=(last_seen.gte.${seen},source.eq.Visiteur)&order=first_start.asc&limit=1000&offset=${offset}`;
+    const r = await fetch(url, {headers: {apikey: SB_KEY}});
+    if (!r.ok) throw new Error(r.status);
+    const page = await r.json();
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  if (!rows.length) throw new Error("vide");
+  return {
+    generated_at: rows.map(x => x.last_seen).sort().pop(),
+    features: rows.map(({lat, lon, last_seen, ...p}) => ({type: "Feature", geometry: {coordinates: [lon, lat]}, properties: p}))
+  };
+}
+const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+function load() {
+fromSupabase().catch(fromFile).then(data => {
+  features = data.features || [];
+  buildCommunes();
+  const sel = $("cat"), keep = sel.value; sel.length = 1;
+  const counts = {};
+  features.forEach(f => { const c = f.properties.category || "Autre"; counts[c] = (counts[c] || 0) + 1; });
+  Object.keys(counts).sort((a, b) => (a === "Autre") - (b === "Autre") || a.localeCompare(b, "fr")).forEach(c => {
+    const o = document.createElement("option"); o.value = c; o.textContent = `${c} (${counts[c]})`; $("cat").appendChild(o);
+  });
+  sel.value = keep;
+  if (data.generated_at) $("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
+  render();
+  applyHash();
+}).catch(() => { $("count").textContent = "Les événements n’ont pas pu être chargés. Réessayez plus tard."; });
+}
+load();
+
+function applyHash() {
+  const m = location.hash.match(/^#c=(.+)$/);
+  if (!m) return;
+  const k = decodeURIComponent(m[1]).replace(/-/g, " ");
+  if (communes.has(k)) choose(k);
+}
+function buildCommunes() {
+  communes.clear();
+  for (const f of features) {
+    const p = f.properties, k = norm(p.locality);
+    if (!k) continue;
+    const c = communes.get(k) || {name: p.locality, count: 0, lat: 0, lon: 0};
+    c.count++; c.lat += f.geometry.coordinates[1]; c.lon += f.geometry.coordinates[0];
+    communes.set(k, c);
+  }
+  $("dl-communes").innerHTML = [...communes.values()].map(c => c.name).sort((a, b) => a.localeCompare(b, "fr")).map(n => `<option value="${esc(n)}">`).join("");
+}
+const sugg = $("sugg");
+let current = [], active = -1;
+function hideSugg() { sugg.hidden = true; active = -1; $("q").setAttribute("aria-expanded", "false"); }
+function showSugg() {
+  const qn = norm($("q").value);
+  if (!qn) return hideSugg();
+  current = [...communes.entries()]
+    .map(([k, c]) => ({k, c, s: k.startsWith(qn) ? 0 : (" " + k).includes(" " + qn) ? 1 : k.includes(qn) ? 2 : 9}))
+    .filter(x => x.s < 9).sort((a, b) => a.s - b.s || b.c.count - a.c.count).slice(0, 8);
+  sugg.innerHTML = current.map((x, i) => `<li role="option" id="o${i}" data-k="${esc(x.k)}">${esc(x.c.name)} <small>· ${x.c.count} événement${x.c.count > 1 ? "s" : ""}</small></li>`).join("");
+  active = -1; sugg.hidden = !current.length; $("q").setAttribute("aria-expanded", String(!!current.length));
+}
+function choose(k) {
+  const c = communes.get(k); if (!c) return;
+  commune = k; scope = {type: "commune", key: k, name: c.name}; $("q").value = c.name; hideSugg();
+  map.setView([c.lat / c.count, c.lon / c.count], 12);
+  render();
+}
+function mark() { [...sugg.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === active))); }
+$("q").addEventListener("input", () => { commune = null; if (scope.type === "commune") scope = {type: "view"}; showSugg(); render(); });
+$("q").addEventListener("keydown", ev => {
+  if (ev.key === "ArrowDown" && current.length) { ev.preventDefault(); active = (active + 1) % current.length; mark(); }
+  else if (ev.key === "ArrowUp" && current.length) { ev.preventDefault(); active = (active - 1 + current.length) % current.length; mark(); }
+  else if (ev.key === "Enter" && !sugg.hidden && current.length) { ev.preventDefault(); choose(current[Math.max(active, 0)].k); }
+  else if (ev.key === "Escape") hideSugg();
+});
+sugg.addEventListener("mousedown", ev => { const li = ev.target.closest("li"); if (li) { ev.preventDefault(); choose(li.dataset.k); } });
+document.addEventListener("click", ev => { if (!ev.target.closest(".combo")) hideSugg(); });
+
+const FN_URL = SB_URL + "/functions/v1/super-responder", TS_SITEKEY = "0x4AAAAAAF4mxkkqaTwBX9iN";
+let tsId = null, tsToken = "";
+const dlg = $("dlg"), form = $("form"), fmsg = $("fmsg");
+const post = body => fetch(FN_URL, {method: "POST", headers: {"Content-Type": "application/json", apikey: SB_KEY}, body: JSON.stringify(body)})
+  .then(async r => { let d = {}; try { d = await r.json(); } catch (_) {} if (!r.ok) throw new Error(d.error || "Erreur " + r.status); return d; });
+
+$("add").addEventListener("click", () => {
+  fmsg.textContent = ""; dlg.showModal();
+  form.date_start.min = iso(new Date());
+  if (window.turnstile && tsId === null) tsId = turnstile.render("#ts", {sitekey: TS_SITEKEY, callback: t => tsToken = t, "expired-callback": () => tsToken = ""});
+  else if (!window.turnstile) fmsg.textContent = "Le test anti-robot n’a pas pu se charger. Rechargez la page.";
+});
+$("cancel").addEventListener("click", () => dlg.close());
+form.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  if (!tsToken) { fmsg.textContent = "Validez d’abord le test anti-robot."; return; }
+  $("send").disabled = true; fmsg.textContent = "Envoi en cours…";
+  try {
+    const d = await post({action: "submit", token: tsToken, event: Object.fromEntries(new FormData(form).entries())});
+    fmsg.textContent = d.message || "Merci !"; form.reset();
+    setTimeout(() => { dlg.close(); load(); }, 1500);
+  } catch (e) { fmsg.textContent = e.message; }
+  finally { $("send").disabled = false; if (window.turnstile && tsId !== null) { turnstile.reset(tsId); tsToken = ""; } }
+});
+document.addEventListener("click", async ev => {
+  const b = ev.target.closest(".rep[data-id]"); if (!b) return;
+  b.disabled = true; b.textContent = "Envoi…";
+  try { await post({action: "report", event_id: b.dataset.id}); b.textContent = "Merci, signalé"; }
+  catch (_) { b.textContent = "Échec, réessayez"; b.disabled = false; }
+});
+
+["period", "cat", "radius"].forEach(id => $(id).addEventListener("change", render));
+</script>
+</body>
+</html>
