@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Événements en Touraine : la carte des sorties – Agenda Touraine</title>
-<meta name="description" content="Que faire en Touraine ? Carte interactive de tous les événements à venir en Indre-et-Loire : marchés, concerts, spectacles, fêtes. Cherchez par commune, date ou autour de vous.">
+<title>ACTIFF – Carte des événements en France</title>
+<meta name="description" content="Trouvez les événements près de chez vous partout en France : marchés, concerts, spectacles, fêtes. Carte interactive ACTIFF, par région, commune et date.">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
@@ -79,12 +79,18 @@ input,select,button.near{border-radius:999px;padding:.45rem .9rem}
 #list li.more{padding:.7rem .9rem;font-size:.85rem;color:#4b5b5a}
 </style>
 <style>#znote{padding:.35rem .9rem;font-size:.8rem;color:#6a4b00;background:#fff8e6}#znote:empty{display:none}</style>
+<style>
+h1 small{font:400 .8rem system-ui,sans-serif;color:#4b5b5a;margin-left:.3rem}
+.rb span{display:flex;flex-direction:column;align-items:center;justify-content:center;width:120px;padding:.25rem .3rem;background:#fff;border:2px solid var(--loire);border-radius:10px;font-size:.75rem;line-height:1.15;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.2);cursor:pointer}
+.rb b{font-size:1rem;color:var(--loire)}
+</style>
 </head>
 <body>
 <header>
-  <h1>Agenda Touraine</h1>
+  <h1>ACTIFF <small>Carte des événements</small></h1>
   <div class="filters">
     <div class="combo"><input id="q" type="search" role="combobox" aria-expanded="false" aria-controls="sugg" aria-autocomplete="list" autocomplete="off" placeholder="Commune ou titre…" aria-label="Rechercher une commune ou un événement"><ul id="sugg" role="listbox" hidden></ul></div>
+    <select id="region" aria-label="Région"><option value="">Toute la France</option></select>
     <select id="period" aria-label="Période">
       <option value="all">Toutes les dates</option>
       <option value="today">Aujourd’hui</option>
@@ -147,12 +153,38 @@ const CATS = ["Festival", "Concert et musique", "Marché et foire", "Spectacle",
 const catColors = {"Festival": "#b5446e", "Concert et musique": "#7b4bb0", "Marché et foire": "#c9871a", "Spectacle": "#d9480f", "Exposition et culture": "#2f6fb5", "Sport et nature": "#3a8f4f", "Gastronomie": "#a0522d", "Fête et animation": "#1f6f78", "Autre": "#6b7a79"};
 const colorOf = p => catColors[p.category] || catColors["Autre"];
 
-const map = L.map("map").setView([47.3941, 0.6848], 9);
+const map = L.map("map").setView([46.6, 2.5], 6);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
 const cluster = L.markerClusterGroup({showCoverageOnHover: false, chunkedLoading: true}).addTo(map);
 let features = [], items = [], me = null, meMarker = null, commune = null, scope = {type: "view"};
 let loaded = null, reqId = 0, moveTimer = null, fallback = false;
 const communes = new Map();
+const REGION_VIEW = {"Touraine": [47.39, 0.68, 9], "Auvergne-Rhône-Alpes": [45.3, 4.6, 7], "Bourgogne-Franche-Comté": [47.2, 5.2, 7], "Bretagne": [48.2, -2.9, 8], "Centre-Val de Loire": [47.5, 1.7, 8], "Corse": [42.15, 9.1, 8], "Grand Est": [48.7, 5.6, 7], "Hauts-de-France": [50.0, 2.8, 8], "Île-de-France": [48.7, 2.5, 9], "Normandie": [49.1, 0.2, 8], "Nouvelle-Aquitaine": [45.2, 0.3, 7], "Occitanie": [43.7, 2.1, 7], "Pays de la Loire": [47.5, -0.8, 8], "Provence-Alpes-Côte d'Azur": [43.9, 6.0, 8], "Guadeloupe": [16.2, -61.55, 10], "Martinique": [14.65, -61.0, 10], "Guyane": [4.0, -53.0, 7], "La Réunion": [-21.1, 55.5, 10], "Mayotte": [-12.8, 45.15, 11]};
+const slug = s => norm(s).replace(/ /g, "-");
+let regionCounts = null; const regionLayer = L.layerGroup();
+Object.keys(REGION_VIEW).forEach(r => { const o = document.createElement("option"); o.value = r; o.textContent = r; $("region").appendChild(o); });
+function flyRegion(r) { const [lat, lon, z] = REGION_VIEW[r]; map.setView([lat, lon], z); }
+async function showRegions() {
+  if (!regionCounts) {
+    try { regionCounts = Object.fromEntries((await rpc("region_counts", {})).map(r => [r.region, r.n])); } catch (_) { regionCounts = {}; }
+  }
+  if (map.getZoom() >= MIN_ZOOM) return;
+  regionLayer.clearLayers();
+  const list = Object.entries(regionCounts).filter(([r]) => REGION_VIEW[r]).sort((a, b) => b[1] - a[1]);
+  $("ctx").innerHTML = ""; $("list").innerHTML = "";
+  $("count").textContent = list.length ? "Choisissez une région ou zoomez sur la carte" : "Aucun événement pour le moment.";
+  for (const [r, n] of list) {
+    const [lat, lon] = REGION_VIEW[r], txt = n.toLocaleString("fr-FR") + " événement" + (n > 1 ? "s" : "");
+    if (lon > -6 && lon < 11 && lat > 41 && lat < 52)
+      L.marker([lat, lon], {icon: L.divIcon({className: "rb", html: `<span>${esc(r)}<b>${txt}</b></span>`, iconSize: [120, 44]})}).on("click", () => flyRegion(r)).addTo(regionLayer);
+    const li = document.createElement("li"), b = document.createElement("button");
+    b.type = "button"; b.className = "card"; b.style.setProperty("--c", "#1f6f78");
+    b.innerHTML = `<span class="body"><span class="t">${esc(r)}</span><span class="m">${txt} à venir</span></span>`;
+    b.addEventListener("click", () => flyRegion(r)); li.appendChild(b); $("list").appendChild(li);
+  }
+  regionLayer.addTo(map);
+}
+$("region").addEventListener("change", () => { const v = $("region").value; if (v) flyRegion(v); else map.setView([46.6, 2.5], 6); });
 
 CATS.forEach(c => { const o = document.createElement("option"); o.value = c; o.textContent = c; $("cat").appendChild(o); });
 
@@ -197,10 +229,10 @@ const rowToFeature = r => ({type: "Feature", geometry: {coordinates: [r.lon, r.l
 async function fetchZone(force) {
   if (fallback) { renderList(); return; }
   if (map.getZoom() < MIN_ZOOM) {
-    features = []; loaded = null; render();
-    note("Vue trop large : zoomez sur une région pour afficher les événements.");
+    features = []; items = []; loaded = null; cluster.clearLayers(); note(""); showRegions();
     return;
   }
+  if (map.hasLayer(regionLayer)) map.removeLayer(regionLayer);
   const key = $("period").value + "|" + $("cat").value, view = map.getBounds();
   if (!force && loaded && loaded.key === key && !loaded.capped && loaded.bounds.contains(view)) { renderList(); return; }
   const b = view.pad(0.25), id = ++reqId, r = range($("period").value);
@@ -261,6 +293,7 @@ function render() {
 }
 
 function renderList() {
+  if (map.getZoom() < MIN_ZOOM && !fallback) return;
   const shown = items.filter(inScope), list = $("list"), place = scope.type === "place";
   const crumbs = ["France"];
   if (scope.type !== "view") crumbs.push(`<b>${esc(scope.name)}</b>`);
@@ -357,6 +390,8 @@ $("q").addEventListener("keydown", ev => {
 sugg.addEventListener("mousedown", ev => { const li = ev.target.closest("li"); if (li) { ev.preventDefault(); choose(li.dataset.k); } });
 document.addEventListener("click", ev => { if (!ev.target.closest(".combo")) hideSugg(); });
 async function applyHash() {
+  const mr = location.hash.match(/^#r=(.+)$/);
+  if (mr) { const name = Object.keys(REGION_VIEW).find(r => slug(r) === decodeURIComponent(mr[1])); if (name) { flyRegion(name); return true; } }
   const m = location.hash.match(/^#c=(.+)$/); if (!m) return false;
   const k = decodeURIComponent(m[1]).replace(/-/g, " ");
   try {
