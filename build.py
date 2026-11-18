@@ -11,6 +11,7 @@ import regions
 import supabase_client as sb
 from datatourisme import DatatourismeError, fetch_events
 from normalize import normalize
+from pages import key as norm_key
 
 OUTPUT = config.ROOT / "site" / "events.geojson"
 MAX_GEOJSON = 5000   # au-delà, le fichier de secours n'est plus produit
@@ -58,7 +59,7 @@ def to_row(feat, dep, now):
             "lat": lat, "lon": lon, "dates": p["dates"],
             "first_start": min(d["start"] for d in p["dates"]), "last_end": max(d["end"] for d in p["dates"]),
             "description": p["description"], "image": p["image"], "url": p["url"], "category": p["category"],
-            "department": dep, "region": regions.region_of(dep), "last_seen": now}
+            "department": dep, "region": regions.region_of(dep), "locality_norm": norm_key(p["locality"]), "last_seen": now}
 
 
 def to_feature(row):
