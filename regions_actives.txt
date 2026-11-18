@@ -1,0 +1,9 @@
+# Régions collectées et affichées sur la carte. Une région par ligne.
+# Format :  Nom de la région ; oui ou non
+#   oui = des pages sont aussi créées pour Google (communes, week-end)
+#   non = la région est sur la carte, sans pages pour Google
+# La ligne « * ; non » ajoute toutes les autres régions, sans pages pour Google.
+# Pour référencer une nouvelle région, changez simplement son « non » en « oui ».
+
+Centre-Val de Loire ; oui
+* ; non

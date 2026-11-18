@@ -125,7 +125,7 @@ def main():
     if supabase:
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=STALE_DAYS)).isoformat()
-            features = [to_feature(r) for r in sb.fetch_upcoming(*supabase, date.today().isoformat(), cutoff)]
+            features = [to_feature(r) for r in sb.fetch_upcoming(*supabase, date.today().isoformat(), cutoff, cfg["indexed_regions"])]
         except sb.SupabaseError as error:
             sys.exit(f"ERREUR : {error}")
     else:
@@ -142,7 +142,7 @@ def main():
 
     try:
         import pages
-        print(f"Pages de référencement : {pages.generate(features, config.ROOT / 'site')}")
+        print(f"Pages de référencement : {pages.generate(features, config.ROOT / 'site', cfg['indexed_regions'])}")
     except Exception as error:  # ne bloque jamais la collecte
         print(f"ATTENTION : pages de référencement non générées ({type(error).__name__} : {error})")
 

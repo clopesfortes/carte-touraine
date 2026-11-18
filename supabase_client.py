@@ -57,8 +57,11 @@ def set_sync_state(url, key, department, total, status, when):
                                           "total": total, "last_status": status}], "department")
 
 
-def fetch_upcoming(url, key, today, seen_since):
+def fetch_upcoming(url, key, today, seen_since, only_regions=None):
     path = ("events?select=id,title,locality,lat,lon,dates,description,image,url,category,department,region"
             f"&source=eq.DATAtourisme&hidden=eq.false&last_end=gte.{today}&last_seen=gte.{quote(seen_since)}"
             "&order=first_start.asc,id.asc")
+    if only_regions is not None:
+        names = ",".join('"' + r + '"' for r in sorted(only_regions)) or '"-"'
+        path += f"&region=in.({quote(names)})"
     return fetch_all(url, key, path)

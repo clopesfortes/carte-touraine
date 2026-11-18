@@ -24,3 +24,10 @@ def all_departments():
 
 def region_of(department):
     return DEPARTMENT_REGION.get(department, "")
+
+
+TERRITORY_NAMES = {"37": "Touraine"}   # noms de territoire plus précis que la région
+
+
+def territory_of(department):
+    return TERRITORY_NAMES.get(department) or region_of(department)
