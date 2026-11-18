@@ -78,6 +78,7 @@ input,select,button.near{border-radius:999px;padding:.45rem .9rem}
 .dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.3rem}
 #list li.more{padding:.7rem .9rem;font-size:.85rem;color:#4b5b5a}
 </style>
+<style>#znote{padding:.35rem .9rem;font-size:.8rem;color:#6a4b00;background:#fff8e6}#znote:empty{display:none}</style>
 </head>
 <body>
 <header>
@@ -100,7 +101,7 @@ input,select,button.near{border-radius:999px;padding:.45rem .9rem}
   </div>
 </header>
 <main>
-  <aside id="side"><div id="count" role="status">Chargement…</div><div id="ctx"></div><ul id="list"></ul></aside>
+  <aside id="side"><div id="count" role="status">Chargement…</div><div id="znote" role="status"></div><div id="ctx"></div><ul id="list"></ul></aside>
   <div id="map"></div>
 </main>
 <footer>
@@ -140,11 +141,20 @@ const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toL
 const httpOnly = u => /^https?:\/\//i.test(u || "") ? u : "";
 const km = (a, b) => { const r = x => x * Math.PI / 180, h = Math.sin(r(b[0]-a[0])/2)**2 + Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(r(b[1]-a[1])/2)**2; return 12742 * Math.asin(Math.sqrt(h)); };
 
+const SB_URL = "https://tvuxgyweuecdkbhfdduq.supabase.co", SB_KEY = "sb_publishable_PNxoKVYUvO7TiDY4EyB_8A_OFgztynM", FN_URL = SB_URL + "/functions/v1/super-responder", TS_SITEKEY = "0x4AAAAAAF4mxkkqaTwBX9iN";
+const MIN_ZOOM = 7, LIMIT = 1000, STALE_DAYS = 7;
+const CATS = ["Festival", "Concert et musique", "Marché et foire", "Spectacle", "Exposition et culture", "Sport et nature", "Gastronomie", "Fête et animation", "Autre"];
+const catColors = {"Festival": "#b5446e", "Concert et musique": "#7b4bb0", "Marché et foire": "#c9871a", "Spectacle": "#d9480f", "Exposition et culture": "#2f6fb5", "Sport et nature": "#3a8f4f", "Gastronomie": "#a0522d", "Fête et animation": "#1f6f78", "Autre": "#6b7a79"};
+const colorOf = p => catColors[p.category] || catColors["Autre"];
+
 const map = L.map("map").setView([47.3941, 0.6848], 9);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
-const cluster = L.markerClusterGroup({showCoverageOnHover: false}).addTo(map);
-let features = [], me = null, meMarker = null, commune = null;
+const cluster = L.markerClusterGroup({showCoverageOnHover: false, chunkedLoading: true}).addTo(map);
+let features = [], items = [], me = null, meMarker = null, commune = null, scope = {type: "view"};
+let loaded = null, reqId = 0, moveTimer = null, fallback = false;
 const communes = new Map();
+
+CATS.forEach(c => { const o = document.createElement("option"); o.value = c; o.textContent = c; $("cat").appendChild(o); });
 
 function range(period) {
   const now = new Date(), from = new Date(now), to = new Date(now);
@@ -169,9 +179,6 @@ function popup(p) {
     (p.source === "Visiteur" ? `<p class="note">Proposé par un visiteur, non vérifié. <button type="button" class="rep" data-id="${esc(p.id)}">Signaler</button></p>` : "") + `</div>`;
 }
 
-const catColors = {"Festival": "#b5446e", "Concert et musique": "#7b4bb0", "Marché et foire": "#c9871a", "Spectacle": "#d9480f", "Exposition et culture": "#2f6fb5", "Sport et nature": "#3a8f4f", "Gastronomie": "#a0522d", "Fête et animation": "#1f6f78", "Autre": "#6b7a79"};
-const colorOf = p => catColors[p.category] || catColors["Autre"];
-let items = [], scope = {type: "view"}, moveTimer = null;
 const sameSpot = (it, s) => Math.abs(it.lat - s.lat) < .0015 && Math.abs(it.lon - s.lon) < .0022;
 function inScope(it) {
   if (scope.type === "commune") return norm(it.p.locality) === scope.key;
@@ -181,6 +188,52 @@ function inScope(it) {
 function selectPlace(it) {
   scope = {type: "place", lat: it.lat, lon: it.lon, key: norm(it.p.locality), name: it.p.locality};
   renderList(); $("list").scrollTop = 0;
+}
+const note = t => { $("znote").textContent = t; };
+
+const rowToFeature = r => ({type: "Feature", geometry: {coordinates: [r.lon, r.lat]},
+  properties: {id: r.id, title: r.title, locality: r.locality || "", dates: r.dates || [], description: r.description || "", image: r.image || "", url: r.url || "", category: r.category || "Autre", source: r.source}});
+
+async function fetchZone(force) {
+  if (fallback) { renderList(); return; }
+  if (map.getZoom() < MIN_ZOOM) {
+    features = []; loaded = null; render();
+    note("Vue trop large : zoomez sur une région pour afficher les événements.");
+    return;
+  }
+  const key = $("period").value + "|" + $("cat").value, view = map.getBounds();
+  if (!force && loaded && loaded.key === key && !loaded.capped && loaded.bounds.contains(view)) { renderList(); return; }
+  const b = view.pad(0.25), id = ++reqId, r = range($("period").value);
+  const seen = encodeURIComponent(new Date(Date.now() - STALE_DAYS * 864e5).toISOString());
+  let q = `events?select=id,title,locality,lat,lon,dates,description,image,url,category,source` +
+    `&lat=gte.${b.getSouth()}&lat=lte.${b.getNorth()}&lon=gte.${b.getWest()}&lon=lte.${b.getEast()}` +
+    `&last_end=gte.${r ? r[0] : iso(new Date())}&or=(last_seen.gte.${seen},source.eq.Visiteur)` +
+    `&order=first_start.asc,id.asc&limit=${LIMIT}`;
+  if (r) q += `&first_start=lte.${r[1]}`;
+  if ($("cat").value) q += `&category=eq.${encodeURIComponent($("cat").value)}`;
+  note("Chargement…");
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/${q}`, {headers: {apikey: SB_KEY, Prefer: "count=exact"}});
+    if (!res.ok) throw new Error(res.status);
+    const rows = await res.json();
+    if (id !== reqId) return;
+    const total = Number((res.headers.get("content-range") || "").split("/")[1]) || rows.length;
+    features = rows.map(rowToFeature);
+    loaded = {bounds: b, key, capped: rows.length >= LIMIT};
+    note(total > rows.length ? `Zone très riche : ${rows.length} événements affichés sur ${total}. Zoomez pour voir les autres.` : "");
+    $("updated").textContent = "";
+    render();
+  } catch (_) {
+    if (id !== reqId) return;
+    try {   // secours : fichier statique
+      const r2 = await fetch("events.geojson", {cache: "no-cache"});
+      if (!r2.ok) throw new Error(r2.status);
+      const data = await r2.json();
+      features = data.features || []; fallback = true; note("");
+      if (data.generated_at) $("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
+      render();
+    } catch (__) { note("Les événements n’ont pas pu être chargés. Réessayez plus tard."); }
+  }
 }
 
 function render() {
@@ -209,7 +262,7 @@ function render() {
 
 function renderList() {
   const shown = items.filter(inScope), list = $("list"), place = scope.type === "place";
-  const crumbs = ["Touraine"];
+  const crumbs = ["France"];
   if (scope.type !== "view") crumbs.push(`<b>${esc(scope.name)}</b>`);
   if (place) crumbs.push("ce lieu");
   let actions = "";
@@ -240,13 +293,17 @@ function renderList() {
 
 $("ctx").addEventListener("click", ev => {
   const b = ev.target.closest("[data-act]"); if (!b) return;
-  if (b.dataset.act === "commune") { choose(scope.key); return; }
+  if (b.dataset.act === "commune") {
+    const it = items.find(x => norm(x.p.locality) === scope.key);
+    if (it && !communes.has(scope.key)) communes.set(scope.key, {name: it.p.locality, lat: it.lat, lon: it.lon, count: 0});
+    choose(scope.key); return;
+  }
   const wasCommune = scope.type === "commune";
   scope = {type: "view"}; commune = null;
   if (wasCommune) $("q").value = "";
   map.closePopup(); render();
 });
-map.on("moveend", () => { if (scope.type === "view") { clearTimeout(moveTimer); moveTimer = setTimeout(renderList, 120); } });
+map.on("moveend", () => { clearTimeout(moveTimer); moveTimer = setTimeout(() => fetchZone(false), 350); });
 map.on("click", () => { if (scope.type === "place") { scope = {type: "view"}; renderList(); } });
 
 $("near").addEventListener("click", () => {
@@ -257,87 +314,37 @@ $("near").addEventListener("click", () => {
     if (meMarker) meMarker.remove();
     meMarker = L.circleMarker(me, {radius: 9, color: "#fff", weight: 3, fillColor: "#d9480f", fillOpacity: 1}).addTo(map).bindTooltip("Vous êtes ici");
     $("radius").hidden = false;
-    map.setView(me, 11);
-    render();
+    map.setView(me, 11, {animate: false}); fetchZone(true);
   }, () => { $("count").textContent = "Localisation refusée ou impossible. Autorisez-la dans votre navigateur pour utiliser « Autour de moi »."; render(); }, {timeout: 15000});
 });
 
-const SB_URL = "https://tvuxgyweuecdkbhfdduq.supabase.co";
-const SB_KEY = "sb_publishable_PNxoKVYUvO7TiDY4EyB_8A_OFgztynM";
-
-async function fromSupabase() {
-  const today = iso(new Date());
-  const seen = encodeURIComponent(new Date(Date.now() - 3 * 864e5).toISOString());
-  const rows = [];
-  for (let offset = 0; ; offset += 1000) {
-    const url = `${SB_URL}/rest/v1/events?select=id,title,locality,lat,lon,dates,description,image,url,category,source,last_seen` +
-      `&last_end=gte.${today}&or=(last_seen.gte.${seen},source.eq.Visiteur)&order=first_start.asc&limit=1000&offset=${offset}`;
-    const r = await fetch(url, {headers: {apikey: SB_KEY}});
-    if (!r.ok) throw new Error(r.status);
-    const page = await r.json();
-    rows.push(...page);
-    if (page.length < 1000) break;
-  }
-  if (!rows.length) throw new Error("vide");
-  return {
-    generated_at: rows.map(x => x.last_seen).sort().pop(),
-    features: rows.map(({lat, lon, last_seen, ...p}) => ({type: "Feature", geometry: {coordinates: [lon, lat]}, properties: p}))
-  };
-}
-const fromFile = () => fetch("events.geojson", {cache: "no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
-
-function load() {
-fromSupabase().catch(fromFile).then(data => {
-  features = data.features || [];
-  buildCommunes();
-  const sel = $("cat"), keep = sel.value; sel.length = 1;
-  const counts = {};
-  features.forEach(f => { const c = f.properties.category || "Autre"; counts[c] = (counts[c] || 0) + 1; });
-  Object.keys(counts).sort((a, b) => (a === "Autre") - (b === "Autre") || a.localeCompare(b, "fr")).forEach(c => {
-    const o = document.createElement("option"); o.value = c; o.textContent = `${c} (${counts[c]})`; $("cat").appendChild(o);
-  });
-  sel.value = keep;
-  if (data.generated_at) $("updated").textContent = "Mis à jour le " + new Date(data.generated_at).toLocaleDateString("fr-FR") + ".";
-  render();
-  applyHash();
-}).catch(() => { $("count").textContent = "Les événements n’ont pas pu être chargés. Réessayez plus tard."; });
-}
-load();
-
-function applyHash() {
-  const m = location.hash.match(/^#c=(.+)$/);
-  if (!m) return;
-  const k = decodeURIComponent(m[1]).replace(/-/g, " ");
-  if (communes.has(k)) choose(k);
-}
-function buildCommunes() {
-  communes.clear();
-  for (const f of features) {
-    const p = f.properties, k = norm(p.locality);
-    if (!k) continue;
-    const c = communes.get(k) || {name: p.locality, count: 0, lat: 0, lon: 0};
-    c.count++; c.lat += f.geometry.coordinates[1]; c.lon += f.geometry.coordinates[0];
-    communes.set(k, c);
-  }
-  $("dl-communes").innerHTML = [...communes.values()].map(c => c.name).sort((a, b) => a.localeCompare(b, "fr")).map(n => `<option value="${esc(n)}">`).join("");
-}
+// --- Recherche de communes (côté serveur : tolère accents, tirets, espaces) ---
+const rpc = (name, body) => fetch(`${SB_URL}/rest/v1/rpc/${name}`, {method: "POST", headers: {apikey: SB_KEY, "Content-Type": "application/json"}, body: JSON.stringify(body)})
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
 const sugg = $("sugg");
-let current = [], active = -1;
+let current = [], active = -1, suggTimer = null, suggId = 0;
 function hideSugg() { sugg.hidden = true; active = -1; $("q").setAttribute("aria-expanded", "false"); }
 function showSugg() {
   const qn = norm($("q").value);
-  if (!qn) return hideSugg();
-  current = [...communes.entries()]
-    .map(([k, c]) => ({k, c, s: k.startsWith(qn) ? 0 : (" " + k).includes(" " + qn) ? 1 : k.includes(qn) ? 2 : 9}))
-    .filter(x => x.s < 9).sort((a, b) => a.s - b.s || b.c.count - a.c.count).slice(0, 8);
-  sugg.innerHTML = current.map((x, i) => `<li role="option" id="o${i}" data-k="${esc(x.k)}">${esc(x.c.name)} <small>· ${x.c.count} événement${x.c.count > 1 ? "s" : ""}</small></li>`).join("");
-  active = -1; sugg.hidden = !current.length; $("q").setAttribute("aria-expanded", String(!!current.length));
+  clearTimeout(suggTimer);
+  if (qn.length < 2) return hideSugg();
+  suggTimer = setTimeout(async () => {
+    const id = ++suggId;
+    try {
+      const rows = await rpc("search_communes", {q: qn});
+      if (id !== suggId) return;
+      current = rows.map(c => ({k: norm(c.name), c: {name: c.name, count: c.n, lat: c.lat, lon: c.lon, dep: c.department}}));
+      current.forEach(x => communes.set(x.k, x.c));
+      sugg.innerHTML = current.map((x, i) => `<li role="option" id="o${i}" data-k="${esc(x.k)}">${esc(x.c.name)} <small>· ${x.c.dep ? esc(x.c.dep) + " · " : ""}${x.c.count} événement${x.c.count > 1 ? "s" : ""}</small></li>`).join("");
+      active = -1; sugg.hidden = !current.length; $("q").setAttribute("aria-expanded", String(!!current.length));
+    } catch (_) { hideSugg(); }
+  }, 150);
 }
 function choose(k) {
   const c = communes.get(k); if (!c) return;
   commune = k; scope = {type: "commune", key: k, name: c.name}; $("q").value = c.name; hideSugg();
-  map.setView([c.lat / c.count, c.lon / c.count], 12);
-  render();
+  map.setView([c.lat, c.lon], 12, {animate: false});
+  fetchZone(true);
 }
 function mark() { [...sugg.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === active))); }
 $("q").addEventListener("input", () => { commune = null; if (scope.type === "commune") scope = {type: "view"}; showSugg(); render(); });
@@ -349,13 +356,23 @@ $("q").addEventListener("keydown", ev => {
 });
 sugg.addEventListener("mousedown", ev => { const li = ev.target.closest("li"); if (li) { ev.preventDefault(); choose(li.dataset.k); } });
 document.addEventListener("click", ev => { if (!ev.target.closest(".combo")) hideSugg(); });
+async function applyHash() {
+  const m = location.hash.match(/^#c=(.+)$/); if (!m) return false;
+  const k = decodeURIComponent(m[1]).replace(/-/g, " ");
+  try {
+    const rows = await rpc("search_communes", {q: k});
+    const hit = rows.find(c => norm(c.name) === k) || rows[0];
+    if (!hit) return false;
+    communes.set(norm(hit.name), {name: hit.name, count: hit.n, lat: hit.lat, lon: hit.lon, dep: hit.department});
+    choose(norm(hit.name)); return true;
+  } catch (_) { return false; }
+}
 
-const FN_URL = SB_URL + "/functions/v1/super-responder", TS_SITEKEY = "0x4AAAAAAF4mxkkqaTwBX9iN";
+// --- Formulaire d'ajout et signalement ---
 let tsId = null, tsToken = "";
 const dlg = $("dlg"), form = $("form"), fmsg = $("fmsg");
 const post = body => fetch(FN_URL, {method: "POST", headers: {"Content-Type": "application/json", apikey: SB_KEY}, body: JSON.stringify(body)})
   .then(async r => { let d = {}; try { d = await r.json(); } catch (_) {} if (!r.ok) throw new Error(d.error || "Erreur " + r.status); return d; });
-
 $("add").addEventListener("click", () => {
   fmsg.textContent = ""; dlg.showModal();
   form.date_start.min = iso(new Date());
@@ -363,6 +380,10 @@ $("add").addEventListener("click", () => {
   else if (!window.turnstile) fmsg.textContent = "Le test anti-robot n’a pas pu se charger. Rechargez la page.";
 });
 $("cancel").addEventListener("click", () => dlg.close());
+$("f-loc").addEventListener("input", async () => {
+  const v = norm($("f-loc").value); if (v.length < 2) return;
+  try { const rows = await rpc("search_communes", {q: v}); $("dl-communes").innerHTML = rows.map(c => `<option value="${esc(c.name)}">`).join(""); } catch (_) {}
+});
 form.addEventListener("submit", async ev => {
   ev.preventDefault();
   if (!tsToken) { fmsg.textContent = "Validez d’abord le test anti-robot."; return; }
@@ -370,7 +391,7 @@ form.addEventListener("submit", async ev => {
   try {
     const d = await post({action: "submit", token: tsToken, event: Object.fromEntries(new FormData(form).entries())});
     fmsg.textContent = d.message || "Merci !"; form.reset();
-    setTimeout(() => { dlg.close(); load(); }, 1500);
+    setTimeout(() => { dlg.close(); fetchZone(true); }, 1500);
   } catch (e) { fmsg.textContent = e.message; }
   finally { $("send").disabled = false; if (window.turnstile && tsId !== null) { turnstile.reset(tsId); tsToken = ""; } }
 });
@@ -380,8 +401,9 @@ document.addEventListener("click", async ev => {
   try { await post({action: "report", event_id: b.dataset.id}); b.textContent = "Merci, signalé"; }
   catch (_) { b.textContent = "Échec, réessayez"; b.disabled = false; }
 });
+["period", "cat", "radius"].forEach(id => $(id).addEventListener("change", () => (id === "radius" ? render() : fetchZone(true))));
 
-["period", "cat", "radius"].forEach(id => $(id).addEventListener("change", render));
+(async () => { if (!(await applyHash())) fetchZone(true); })();
 </script>
 </body>
 </html>
