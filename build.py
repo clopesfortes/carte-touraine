@@ -2,7 +2,9 @@
 Lancer : python build.py"""
 import json
 import math
+import re
 import sys
+import unicodedata
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
@@ -11,11 +13,18 @@ import regions
 import supabase_client as sb
 from datatourisme import DatatourismeError, fetch_events
 from normalize import normalize
-from pages import key as norm_key
 
 OUTPUT = config.ROOT / "site" / "events.geojson"
 MAX_GEOJSON = 5000   # au-delà, le fichier de secours n'est plus produit
 STALE_DAYS = 10      # un événement non revu depuis ce délai n'est plus publié sur les pages
+
+
+def norm_key(text):
+    """Forme normalisée d'une commune (sans accents ni ponctuation, « st » devient « saint »)."""
+    t = unicodedata.normalize("NFD", text or "")
+    t = "".join(c for c in t if not unicodedata.combining(c)).lower().replace("œ", "oe")
+    t = re.sub(r"[^a-z0-9]+", " ", t).strip()
+    return re.sub(r"\bste\b", "sainte", re.sub(r"\bst\b", "saint", t))
 
 
 def pick_departments(wanted, state, budget):
